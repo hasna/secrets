@@ -44,6 +44,7 @@ Commands:
   aws sync                    bidirectional sync
 
   mcp                         start MCP server (stdio)
+  mcp install [--target claude|codex|gemini]  install MCP into AI agents
 
 Types: ${SECRET_TYPES.join(", ")}
 TTL examples: 30d, 24h, 60m
@@ -311,8 +312,15 @@ switch (command) {
   }
 
   case "mcp": {
-    const { startMcpServer } = await import("./mcp.js");
-    await startMcpServer();
+    const [sub] = positional;
+    if (sub === "install") {
+      const targets = flags.target ? [flags.target] : ["claude", "codex", "gemini"];
+      const { installMcp } = await import("./install.js");
+      installMcp(targets);
+    } else {
+      const { startMcpServer } = await import("./mcp.js");
+      await startMcpServer();
+    }
     break;
   }
 
