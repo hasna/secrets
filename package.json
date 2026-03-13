@@ -1,0 +1,35 @@
+{
+  "name": "@hasna/secrets",
+  "version": "0.1.0",
+  "description": "A local secrets vault for AI agents — store API keys, passwords, tokens, and any credentials",
+  "type": "module",
+  "bin": {
+    "secrets": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node --format esm",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "secrets",
+    "vault",
+    "credentials",
+    "agents",
+    "ai",
+    "cli"
+  ],
+  "author": "hasna",
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
