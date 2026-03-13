@@ -1,13 +1,26 @@
+export type SecretType = "api_key" | "password" | "token" | "credential" | "other";
+
 export interface SecretEntry {
   key: string;
   value: string;
-  type: "api_key" | "password" | "token" | "credential" | "other";
+  type: SecretType;
   label?: string;
-  createdAt: string;
-  updatedAt: string;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface Vault {
-  version: number;
-  secrets: Record<string, SecretEntry>;
+export interface AuditEntry {
+  id: number;
+  action: "get" | "set" | "delete";
+  key: string;
+  agent: string;
+  timestamp: string;
+}
+
+export interface AwsConfig {
+  access_key_id: string;
+  secret_access_key: string;
+  region: string;
+  prefix?: string;
 }

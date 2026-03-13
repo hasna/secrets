@@ -1,129 +1,168 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-import type { Vault, SecretEntry } from "./types.js";
+import { hostname } from "os";
+import { getDb } from "./db.js";
+import type { SecretEntry, SecretType, AuditEntry } from "./types.js";
 
-const VAULT_VERSION = 1;
-
-function getVaultFilePath(): string {
-  if (process.env.OPEN_SECRETS_VAULT) return process.env.OPEN_SECRETS_VAULT;
-  return join(homedir(), ".open-secrets", "vault.json");
+function currentAgent(): string {
+  return process.env.AGENT_ID ?? process.env.USER ?? hostname();
 }
 
-function ensureVaultDir(): void {
-  const dir = join(getVaultFilePath(), "..");
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-}
-
-function loadVault(): Vault {
-  ensureVaultDir();
-  const file = getVaultFilePath();
-  if (!existsSync(file)) {
-    return { version: VAULT_VERSION, secrets: {} };
-  }
-  try {
-    const raw = readFileSync(file, "utf-8");
-    return JSON.parse(raw) as Vault;
-  } catch {
-    return { version: VAULT_VERSION, secrets: {} };
-  }
-}
-
-function saveVault(vault: Vault): void {
-  ensureVaultDir();
-  const file = getVaultFilePath();
-  writeFileSync(file, JSON.stringify(vault, null, 2), { mode: 0o600 });
-  chmodSync(file, 0o600);
+function audit(action: AuditEntry["action"], key: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO audit_log (action, key, agent, timestamp) VALUES (?, ?, ?, ?)"
+  ).run(action, key, currentAgent(), new Date().toISOString());
 }
 
 export function setSecret(
   key: string,
   value: string,
-  type: SecretEntry["type"] = "other",
-  label?: string
+  type: SecretType = "other",
+  label?: string,
+  expiresAt?: string
 ): SecretEntry {
-  const vault = loadVault();
+  const db = getDb();
   const now = new Date().toISOString();
-  const existing = vault.secrets[key];
-  const entry: SecretEntry = {
-    key,
-    value,
-    type,
-    label,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-  };
-  vault.secrets[key] = entry;
-  saveVault(vault);
-  return entry;
+  const existing = db.prepare("SELECT created_at FROM secrets WHERE key = ?").get(key) as
+    | { created_at: string }
+    | undefined;
+
+  db.prepare(`
+    INSERT INTO secrets (key, value, type, label, expires_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      type = excluded.type,
+      label = excluded.label,
+      expires_at = excluded.expires_at,
+      updated_at = excluded.updated_at
+  `).run(key, value, type, label ?? null, expiresAt ?? null, existing?.created_at ?? now, now);
+
+  audit("set", key);
+  return getSecret(key)!;
 }
 
 export function getSecret(key: string): SecretEntry | undefined {
-  const vault = loadVault();
-  return vault.secrets[key];
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM secrets WHERE key = ?").get(key) as SecretEntry | undefined;
+  if (!row) return undefined;
+  audit("get", key);
+  return row;
 }
 
 export function deleteSecret(key: string): boolean {
-  const vault = loadVault();
-  if (!vault.secrets[key]) return false;
-  delete vault.secrets[key];
-  saveVault(vault);
+  const db = getDb();
+  const result = db.prepare("DELETE FROM secrets WHERE key = ?").run(key);
+  if (result.changes === 0) return false;
+  audit("delete", key);
   return true;
 }
 
 export function listSecrets(namespace?: string): SecretEntry[] {
-  const vault = loadVault();
-  const all = Object.values(vault.secrets);
-  if (!namespace) return all;
+  const db = getDb();
+  if (!namespace) {
+    return db.prepare("SELECT * FROM secrets ORDER BY key").all() as SecretEntry[];
+  }
   const prefix = namespace.endsWith("/") ? namespace : `${namespace}/`;
-  return all.filter((s) => s.key.startsWith(prefix) || s.key === namespace);
+  return db
+    .prepare("SELECT * FROM secrets WHERE key LIKE ? OR key = ? ORDER BY key")
+    .all(`${prefix}%`, namespace) as SecretEntry[];
 }
 
 export function searchSecrets(query: string): SecretEntry[] {
-  const vault = loadVault();
-  const q = query.toLowerCase();
-  return Object.values(vault.secrets).filter(
-    (s) =>
-      s.key.toLowerCase().includes(q) ||
-      (s.label?.toLowerCase().includes(q) ?? false) ||
-      s.type.toLowerCase().includes(q)
-  );
-}
-
-export function getVaultPath(): string {
-  return getVaultFilePath();
+  const db = getDb();
+  const q = `%${query}%`;
+  return db
+    .prepare(
+      "SELECT * FROM secrets WHERE key LIKE ? OR label LIKE ? OR type LIKE ? ORDER BY key"
+    )
+    .all(q, q, q) as SecretEntry[];
 }
 
 export function importSecrets(
-  entries: Array<{ key: string; value: string; type?: SecretEntry["type"]; label?: string }>
+  entries: Array<{ key: string; value: string; type?: SecretType; label?: string; expires_at?: string }>
 ): number {
-  const vault = loadVault();
-  const now = new Date().toISOString();
   let count = 0;
   for (const e of entries) {
-    const existing = vault.secrets[e.key];
-    vault.secrets[e.key] = {
-      key: e.key,
-      value: e.value,
-      type: e.type ?? "other",
-      label: e.label,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
+    setSecret(e.key, e.value, e.type ?? "other", e.label, e.expires_at);
     count++;
   }
-  saveVault(vault);
   return count;
 }
 
-export function exportSecrets(redact = false): Vault {
-  const vault = loadVault();
-  if (!redact) return vault;
-  const redacted: Vault = { version: vault.version, secrets: {} };
-  for (const [k, v] of Object.entries(vault.secrets)) {
-    redacted.secrets[k] = { ...v, value: "***REDACTED***" };
+export function exportSecrets(redact = false): { version: number; secrets: Record<string, SecretEntry> } {
+  const db = getDb();
+  const rows = db.prepare("SELECT * FROM secrets ORDER BY key").all() as SecretEntry[];
+  const secrets: Record<string, SecretEntry> = {};
+  for (const row of rows) {
+    secrets[row.key] = redact ? { ...row, value: "***REDACTED***" } : row;
   }
-  return redacted;
+  return { version: 2, secrets };
+}
+
+export function getAuditLog(key?: string, limit = 100): AuditEntry[] {
+  const db = getDb();
+  if (key) {
+    return db
+      .prepare("SELECT * FROM audit_log WHERE key = ? ORDER BY timestamp DESC LIMIT ?")
+      .all(key, limit) as AuditEntry[];
+  }
+  return db
+    .prepare("SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?")
+    .all(limit) as AuditEntry[];
+}
+
+export function pruneExpired(): number {
+  const db = getDb();
+  const result = db
+    .prepare("DELETE FROM secrets WHERE expires_at IS NOT NULL AND expires_at < ?")
+    .run(new Date().toISOString());
+  return result.changes;
+}
+
+export function getVaultPath(): string {
+  const db = getDb();
+  return (db as any).filename as string;
+}
+
+// Users / agents registry
+export interface User {
+  id: string;
+  name: string;
+  type: "human" | "agent";
+  registered_at: string;
+  last_seen?: string;
+}
+
+export function registerUser(id: string, name: string, type: "human" | "agent" = "human"): User {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO users (id, name, type, registered_at, last_seen)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET name = excluded.name, type = excluded.type, last_seen = excluded.last_seen
+  `).run(id, name, type, now, now);
+  return getUser(id)!;
+}
+
+export function getUser(id: string): User | undefined {
+  const db = getDb();
+  return db.prepare("SELECT * FROM users WHERE id = ?").get(id) as User | undefined;
+}
+
+export function listUsers(type?: "human" | "agent"): User[] {
+  const db = getDb();
+  if (type) {
+    return db.prepare("SELECT * FROM users WHERE type = ? ORDER BY name").all(type) as User[];
+  }
+  return db.prepare("SELECT * FROM users ORDER BY type, name").all() as User[];
+}
+
+export function deleteUser(id: string): boolean {
+  const db = getDb();
+  return db.prepare("DELETE FROM users WHERE id = ?").run(id).changes > 0;
+}
+
+export function touchUser(id: string): void {
+  const db = getDb();
+  db.prepare("UPDATE users SET last_seen = ? WHERE id = ?").run(new Date().toISOString(), id);
 }

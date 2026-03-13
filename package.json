@@ -7,7 +7,8 @@
     "secrets": "./dist/index.js"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --format esm",
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm",
+    "build:bin": "bun build src/index.ts --compile --outfile dist/secrets",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   },
@@ -31,5 +32,9 @@
   },
   "devDependencies": {
     "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1008.0",
+    "@modelcontextprotocol/sdk": "^1.27.1"
   }
 }
