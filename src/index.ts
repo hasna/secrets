@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import {
+  getUser,
   setSecret,
   getSecret,
   deleteSecret,
@@ -113,6 +114,11 @@ switch (command) {
     if (!SECRET_TYPES.includes(type)) {
       console.error(`Invalid type "${type}". Valid: ${SECRET_TYPES.join(", ")}`);
       process.exit(1);
+    }
+    // Warn if AGENT_ID is set but agent is not registered — mirrors open-todos pattern
+    const agentId = process.env["AGENT_ID"];
+    if (agentId && !getUser(agentId)) {
+      console.warn(`⚠ Warning: AGENT_ID="${agentId}" is set but not registered. Run: secrets users register ${agentId} <name> --type agent`);
     }
     const expiresAt = flags.ttl ? parseTtl(flags.ttl) : undefined;
     const entry = setSecret(key, value, type, flags.label, expiresAt);
