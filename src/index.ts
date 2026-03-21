@@ -27,6 +27,7 @@ Commands:
   set <key> <value> [--type <type>] [--label <label>] [--ttl <ttl>]
   get <key>
   delete <key>               (aliases: remove, rm, uninstall)
+  import-dot-secrets         import all *.env files from ~/.secrets/ [--dir <path>] [--overwrite]
   list [namespace]
   search <query>
   export [--redact]
@@ -330,6 +331,69 @@ switch (command) {
       const { startMcpServer } = await import("./mcp.js");
       await startMcpServer();
     }
+    break;
+  }
+
+  case "import-dot-secrets": {
+    // Bridge: import all *.env files from ~/.secrets/ into the vault
+    const { readdirSync, readFileSync, existsSync } = await import("fs");
+    const { join } = await import("path");
+    const { homedir } = await import("os");
+    const secretsDir = flags.dir ?? join(homedir(), ".secrets");
+    if (!existsSync(secretsDir)) {
+      console.error(`Directory not found: ${secretsDir}`);
+      process.exit(1);
+    }
+
+    // Recursively find *.env files
+    function findEnvFiles(dir: string): string[] {
+      const results: string[] = [];
+      try {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) results.push(...findEnvFiles(full));
+          else if (entry.isFile() && entry.name.endsWith(".env")) results.push(full);
+        }
+      } catch { /* skip unreadable dirs */ }
+      return results;
+    }
+
+    // Infer type from key name
+    function inferType(key: string): SecretEntry["type"] {
+      const k = key.toUpperCase();
+      if (k.includes("PASSWORD") || k.includes("PASS") || k.includes("PWD")) return "password";
+      if (k.includes("API_KEY") || k.includes("APIKEY") || k.includes("SECRET_KEY")) return "api_key";
+      if (k.includes("TOKEN") || k.includes("_KEY")) return "token";
+      if (k.includes("CERT") || k.includes("CERTIFICATE")) return "certificate";
+      return "other";
+    }
+
+    const envFiles = findEnvFiles(secretsDir);
+    let imported = 0, skipped = 0;
+    for (const file of envFiles) {
+      const content = readFileSync(file, "utf-8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx === -1) continue;
+        const rawKey = trimmed.slice(0, eqIdx).trim();
+        let rawValue = trimmed.slice(eqIdx + 1).trim();
+        if ((rawValue.startsWith('"') && rawValue.endsWith('"')) ||
+            (rawValue.startsWith("'") && rawValue.endsWith("'"))) {
+          rawValue = rawValue.slice(1, -1);
+        }
+        if (!rawKey || !rawValue) continue;
+        const key = rawKey.toLowerCase().replace(/_/g, "-");
+        const type = inferType(rawKey);
+        // Skip if already exists and not overriding
+        if (!flags.overwrite && getSecret(key)) { skipped++; continue; }
+        setSecret(key, rawValue, type);
+        imported++;
+      }
+    }
+    console.log(`✓ Imported ${imported} secret(s) from ${envFiles.length} file(s) in ${secretsDir}`);
+    if (skipped > 0) console.log(`  Skipped ${skipped} already-existing key(s) (use --overwrite to replace)`);
     break;
   }
 
