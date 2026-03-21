@@ -25,7 +25,7 @@ secrets — local secrets vault for AI agents
 Commands:
   set <key> <value> [--type <type>] [--label <label>] [--ttl <ttl>]
   get <key>
-  delete <key>
+  delete <key>               (aliases: remove, rm, uninstall)
   list [namespace]
   search <query>
   export [--redact]
@@ -133,9 +133,12 @@ switch (command) {
     break;
   }
 
-  case "delete": {
+  case "delete":
+  case "remove":
+  case "rm":
+  case "uninstall": {
     const [key] = positional;
-    if (!key) { console.error("Usage: secrets delete <key>"); process.exit(1); }
+    if (!key) { console.error(`Usage: secrets ${command} <key>`); process.exit(1); }
     if (!deleteSecret(key)) { console.error(`Not found: ${key}`); process.exit(1); }
     console.log(`✓ Deleted: ${key}`);
     break;
