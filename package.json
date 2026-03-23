@@ -1,7 +1,7 @@
 {
   "name": "@hasna/secrets",
   "version": "0.1.9",
-  "description": "A local secrets vault for AI agents — store API keys, passwords, tokens, and any credentials",
+  "description": "A local secrets vault for AI agents \u2014 store API keys, passwords, tokens, and any credentials",
   "type": "module",
   "bin": {
     "secrets": "dist/index.js"
@@ -10,7 +10,8 @@
     "build": "bun build src/index.ts --outdir dist --target bun --format esm && chmod +x dist/index.js",
     "build:bin": "bun build src/index.ts --compile --outfile dist/secrets",
     "test": "bun test",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "postinstall": "mkdir -p $HOME/.hasna/secrets 2>/dev/null || true"
   },
   "files": [
     "dist",
