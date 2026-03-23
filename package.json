@@ -1,6 +1,6 @@
 {
   "name": "@hasna/secrets",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A local secrets vault for AI agents — store API keys, passwords, tokens, and any credentials",
   "type": "module",
   "bin": {
@@ -14,7 +14,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
     "secrets",
@@ -25,7 +26,7 @@
     "cli"
   ],
   "author": "hasna",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
