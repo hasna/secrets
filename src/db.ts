@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
+import { SqliteAdapter, ensureFeedbackTable, migrateDotfile } from "@hasna/cloud";
 import { join } from "path";
 import { homedir } from "os";
-import { mkdirSync, existsSync, cpSync } from "fs";
+import { mkdirSync, existsSync } from "fs";
 
 function getDbPath(): string {
   // Support env var overrides
@@ -9,19 +10,9 @@ function getDbPath(): string {
   if (envPath) return envPath;
 
   const home = homedir();
+  migrateDotfile("secrets");
   const newDir = join(home, ".hasna", "secrets");
-  const oldDir = join(home, ".open-secrets");
-
-  // Auto-migrate from old location if new dir doesn't exist yet
-  if (!existsSync(newDir) && existsSync(oldDir)) {
-    try {
-      mkdirSync(join(home, ".hasna"), { recursive: true });
-      cpSync(oldDir, newDir, { recursive: true });
-    } catch {
-      // Fall through
-    }
-  }
-
+  if (!existsSync(newDir)) mkdirSync(newDir, { recursive: true, mode: 0o700 });
   return join(newDir, "vault.db");
 }
 
@@ -30,6 +21,7 @@ function getDbDir(): string {
 }
 
 let _db: Database | null = null;
+let _adapter: SqliteAdapter | null = null;
 
 export function getDb(): Database {
   const path = getDbPath();
@@ -37,19 +29,21 @@ export function getDb(): Database {
   if (_db && (_db as any).filename !== path) {
     _db.close();
     _db = null;
+    _adapter = null;
   }
   if (!_db) {
     const dir = getDbDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-    _db = new Database(path, { create: true });
-    _db.exec("PRAGMA journal_mode=WAL");
+    _adapter = new SqliteAdapter(path);
+    _db = _adapter.raw;
     migrate(_db);
+    ensureFeedbackTable(_adapter);
   }
   return _db;
 }
 
 export function closeDb(): void {
-  if (_db) { _db.close(); _db = null; }
+  if (_db) { _db.close(); _db = null; _adapter = null; }
 }
 
 export function resetDb(): void {

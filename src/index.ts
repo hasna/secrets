@@ -15,6 +15,7 @@ import {
   listUsers,
   deleteUser,
 } from "./store.js";
+import { getDb } from "./db.js";
 import type { SecretEntry } from "./types.js";
 
 const SECRET_TYPES: SecretEntry["type"][] = ["api_key", "password", "token", "credential", "other"];
@@ -45,6 +46,7 @@ Commands:
   aws pull <key>              pull secret from AWS Secrets Manager
   aws sync                    bidirectional sync
 
+  feedback <message>          send feedback [--email <email>] [--category <cat>]
   mcp                         start MCP server (stdio)
   mcp install [--target claude|codex|gemini]  install MCP into AI agents
 
@@ -394,6 +396,19 @@ switch (command) {
     }
     console.log(`✓ Imported ${imported} secret(s) from ${envFiles.length} file(s) in ${secretsDir}`);
     if (skipped > 0) console.log(`  Skipped ${skipped} already-existing key(s) (use --overwrite to replace)`);
+    break;
+  }
+
+  case "feedback": {
+    const [msg, ...restMsg] = positional;
+    const message = [msg, ...restMsg.filter(r => !r.startsWith("--"))].join(" ");
+    if (!message) { console.error("Usage: secrets feedback <message> [--email <email>] [--category <cat>]"); process.exit(1); }
+    const db = getDb();
+    db.run(
+      "INSERT INTO feedback (message, email, category, version) VALUES (?, ?, ?, ?)",
+      [message, flags.email || null, flags.category || "general", "0.1.0"]
+    );
+    console.log("✓ Feedback saved. Thank you!");
     break;
   }
 

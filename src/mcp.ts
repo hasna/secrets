@@ -129,6 +129,25 @@ export async function startMcpServer(): Promise<void> {
     }
   );
 
+  server.tool(
+    "send_feedback",
+    "Send feedback about this service",
+    {
+      message: z.string().describe("Feedback message"),
+      email: z.string().optional().describe("Contact email (optional)"),
+      category: z.enum(["bug", "feature", "general"]).optional().describe("Feedback category"),
+    },
+    async ({ message, email, category }) => {
+      const { getDb } = await import("./db.js");
+      const db = getDb();
+      db.run(
+        "INSERT INTO feedback (message, email, category, version) VALUES (?, ?, ?, ?)",
+        [message, email || null, category || "general", "0.1.0"]
+      );
+      return { content: [{ type: "text", text: "Feedback saved. Thank you!" }] };
+    }
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
