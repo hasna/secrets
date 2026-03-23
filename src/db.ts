@@ -1,11 +1,28 @@
 import { Database } from "bun:sqlite";
 import { join } from "path";
 import { homedir } from "os";
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, cpSync } from "fs";
 
 function getDbPath(): string {
-  if (process.env.OPEN_SECRETS_DB) return process.env.OPEN_SECRETS_DB;
-  return join(homedir(), ".open-secrets", "vault.db");
+  // Support env var overrides
+  const envPath = process.env.HASNA_SECRETS_DB_PATH ?? process.env.OPEN_SECRETS_DB;
+  if (envPath) return envPath;
+
+  const home = homedir();
+  const newDir = join(home, ".hasna", "secrets");
+  const oldDir = join(home, ".open-secrets");
+
+  // Auto-migrate from old location if new dir doesn't exist yet
+  if (!existsSync(newDir) && existsSync(oldDir)) {
+    try {
+      mkdirSync(join(home, ".hasna"), { recursive: true });
+      cpSync(oldDir, newDir, { recursive: true });
+    } catch {
+      // Fall through
+    }
+  }
+
+  return join(newDir, "vault.db");
 }
 
 function getDbDir(): string {

@@ -14,7 +14,7 @@ import { setSecret, listSecrets, getSecret } from "./store.js";
 import type { AwsConfig } from "./types.js";
 
 function getAwsConfigPath(): string {
-  return join(homedir(), ".open-secrets", "aws.json");
+  return join(homedir(), ".hasna", "secrets", "aws.json");
 }
 
 export function loadAwsConfig(): AwsConfig | null {
