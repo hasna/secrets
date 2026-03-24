@@ -1,7 +1,7 @@
 {
   "name": "@hasna/secrets",
   "version": "0.1.10",
-  "description": "A local secrets vault for AI agents \u2014 store API keys, passwords, tokens, and any credentials",
+  "description": "A local secrets vault for AI agents — store API keys, passwords, tokens, and any credentials",
   "type": "module",
   "bin": {
     "secrets": "dist/index.js"
@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1008.0",
-    "@hasna/cloud": "^0.1.1",
+    "@hasna/cloud": "0.1.5",
     "@modelcontextprotocol/sdk": "^1.27.1"
   }
 }
