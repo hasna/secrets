@@ -28,7 +28,8 @@ Commands:
   set <key> <value> [--type <type>] [--label <label>] [--ttl <ttl>]
   get <key>
   delete <key>               (aliases: remove, rm, uninstall)
-  import-dot-secrets         import all *.env files from ~/.secrets/ [--dir <path>] [--overwrite]
+  import-env                 import ~/.secrets/ .env files into vault [--dir <path>] [--push] [--dry-run] [--overwrite]
+  export-env                 export vault secrets to ~/.secrets/ .env files [--dir <path>] [--force] [--dry-run]
   list [namespace]
   search <query>
   export [--redact]
@@ -65,14 +66,20 @@ Examples:
 `);
 }
 
+const BOOLEAN_FLAGS = new Set(["redact", "push", "dry-run", "force", "overwrite"]);
+
 function parseArgs(args: string[]): { flags: Record<string, string>; positional: string[] } {
   const flags: Record<string, string> = {};
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--")) {
       const key = args[i].slice(2);
-      flags[key] = args[i + 1] ?? "true";
-      i++;
+      if (BOOLEAN_FLAGS.has(key) || !args[i + 1] || args[i + 1].startsWith("--")) {
+        flags[key] = "true";
+      } else {
+        flags[key] = args[i + 1];
+        i++;
+      }
     } else {
       positional.push(args[i]);
     }
@@ -396,6 +403,49 @@ switch (command) {
     }
     console.log(`✓ Imported ${imported} secret(s) from ${envFiles.length} file(s) in ${secretsDir}`);
     if (skipped > 0) console.log(`  Skipped ${skipped} already-existing key(s) (use --overwrite to replace)`);
+    break;
+  }
+
+  case "import-env": {
+    const { importEnv } = await import("./env.js");
+    try {
+      const result = await importEnv({
+        dir: flags.dir,
+        push: "push" in flags,
+        dryRun: "dry-run" in flags,
+        overwrite: "overwrite" in flags,
+      });
+      if ("dry-run" in flags) {
+        console.log(`\n[dry-run] Would import ${result.imported} secret(s) from ${result.files} file(s)`);
+      } else {
+        console.log(`✓ Imported ${result.imported} secret(s) from ${result.files} file(s)`);
+        if (result.skipped > 0) console.log(`  Skipped ${result.skipped} already-existing key(s) (use --overwrite to replace)`);
+      }
+    } catch (e: any) {
+      console.error(`Import failed: ${e.message}`);
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "export-env": {
+    const { exportEnv } = await import("./env.js");
+    try {
+      const result = exportEnv({
+        dir: flags.dir,
+        force: "force" in flags,
+        dryRun: "dry-run" in flags,
+      });
+      if ("dry-run" in flags) {
+        console.log(`\n[dry-run] Would export ${result.exported} secret(s) to ${result.files} file(s)`);
+      } else {
+        console.log(`✓ Exported ${result.exported} secret(s) to ${result.files} file(s)`);
+        if (result.skippedFiles > 0) console.log(`  Skipped ${result.skippedFiles} existing file(s) (use --force to overwrite)`);
+      }
+    } catch (e: any) {
+      console.error(`Export failed: ${e.message}`);
+      process.exit(1);
+    }
     break;
   }
 
