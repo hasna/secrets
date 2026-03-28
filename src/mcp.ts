@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerCloudTools } from "@hasna/cloud";
+import { PG_MIGRATIONS } from "./pg-migrations.js";
 import { z } from "zod";
 import {
   setSecret,
@@ -150,7 +151,7 @@ export async function startMcpServer(): Promise<void> {
   );
 
   const transport = new StdioServerTransport();
-  registerCloudTools(server, "secrets");
+  registerCloudTools(server, "secrets", { migrations: PG_MIGRATIONS });
   await server.connect(transport);
 }
 
