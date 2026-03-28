@@ -1,6 +1,6 @@
 {
   "name": "@hasna/secrets",
-  "version": "0.1.13",
+  "version": "0.1.15",
   "description": "A local secrets vault for AI agents — store API keys, passwords, tokens, and any credentials",
   "type": "module",
   "bin": {

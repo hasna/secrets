@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerCloudTools } from "@hasna/cloud";
 import { PG_MIGRATIONS } from "./pg-migrations.js";
+import { join } from "path";
+import { homedir } from "os";
 import { z } from "zod";
 import {
   setSecret,
@@ -151,7 +153,8 @@ export async function startMcpServer(): Promise<void> {
   );
 
   const transport = new StdioServerTransport();
-  registerCloudTools(server, "secrets", { migrations: PG_MIGRATIONS });
+  const vaultPath = process.env.HASNA_SECRETS_DB_PATH ?? process.env.OPEN_SECRETS_DB ?? join(homedir(), ".hasna", "secrets", "vault.db");
+  registerCloudTools(server, "secrets", { migrations: PG_MIGRATIONS, dbPath: vaultPath });
   await server.connect(transport);
 }
 
