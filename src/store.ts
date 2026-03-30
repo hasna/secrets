@@ -1,5 +1,6 @@
 import { hostname } from "os";
 import { getDb } from "./db.js";
+import { encrypt, decrypt, isEncrypted } from "./crypto.js";
 import type { SecretEntry, SecretType, AuditEntry } from "./types.js";
 
 function currentAgent(): string {
@@ -26,6 +27,7 @@ export function setSecret(
     | { created_at: string }
     | undefined;
 
+  const encryptedValue = encrypt(value);
   db.prepare(`
     INSERT INTO secrets (key, value, type, label, expires_at, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -35,7 +37,7 @@ export function setSecret(
       label = excluded.label,
       expires_at = excluded.expires_at,
       updated_at = excluded.updated_at
-  `).run(key, value, type, label ?? null, expiresAt ?? null, existing?.created_at ?? now, now);
+  `).run(key, encryptedValue, type, label ?? null, expiresAt ?? null, existing?.created_at ?? now, now);
 
   audit("set", key);
   return getSecret(key)!;
@@ -45,6 +47,7 @@ export function getSecret(key: string): SecretEntry | undefined {
   const db = getDb();
   const row = db.prepare("SELECT * FROM secrets WHERE key = ?").get(key) as SecretEntry | undefined;
   if (!row) return undefined;
+  row.value = decrypt(row.value);
   audit("get", key);
   return row;
 }
@@ -57,25 +60,33 @@ export function deleteSecret(key: string): boolean {
   return true;
 }
 
+function decryptRows(rows: SecretEntry[]): SecretEntry[] {
+  return rows.map((r) => ({ ...r, value: decrypt(r.value) }));
+}
+
 export function listSecrets(namespace?: string): SecretEntry[] {
   const db = getDb();
+  let rows: SecretEntry[];
   if (!namespace) {
-    return db.prepare("SELECT * FROM secrets ORDER BY key").all() as SecretEntry[];
+    rows = db.prepare("SELECT * FROM secrets ORDER BY key").all() as SecretEntry[];
+  } else {
+    const prefix = namespace.endsWith("/") ? namespace : `${namespace}/`;
+    rows = db
+      .prepare("SELECT * FROM secrets WHERE key LIKE ? OR key = ? ORDER BY key")
+      .all(`${prefix}%`, namespace) as SecretEntry[];
   }
-  const prefix = namespace.endsWith("/") ? namespace : `${namespace}/`;
-  return db
-    .prepare("SELECT * FROM secrets WHERE key LIKE ? OR key = ? ORDER BY key")
-    .all(`${prefix}%`, namespace) as SecretEntry[];
+  return decryptRows(rows);
 }
 
 export function searchSecrets(query: string): SecretEntry[] {
   const db = getDb();
   const q = `%${query}%`;
-  return db
+  const rows = db
     .prepare(
       "SELECT * FROM secrets WHERE key LIKE ? OR label LIKE ? OR type LIKE ? ORDER BY key"
     )
     .all(q, q, q) as SecretEntry[];
+  return decryptRows(rows);
 }
 
 export function importSecrets(
@@ -94,7 +105,8 @@ export function exportSecrets(redact = false): { version: number; secrets: Recor
   const rows = db.prepare("SELECT * FROM secrets ORDER BY key").all() as SecretEntry[];
   const secrets: Record<string, SecretEntry> = {};
   for (const row of rows) {
-    secrets[row.key] = redact ? { ...row, value: "***REDACTED***" } : row;
+    const decrypted = { ...row, value: decrypt(row.value) };
+    secrets[row.key] = redact ? { ...decrypted, value: "***REDACTED***" } : decrypted;
   }
   return { version: 2, secrets };
 }

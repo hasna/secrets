@@ -16,6 +16,7 @@ import {
   deleteUser,
 } from "./store.js";
 import { getDb } from "./db.js";
+import { encrypt, decrypt, isEncrypted, getMasterKey } from "./crypto.js";
 import type { SecretEntry } from "./types.js";
 
 const SECRET_TYPES: SecretEntry["type"][] = ["api_key", "password", "token", "credential", "other"];
@@ -41,6 +42,11 @@ Commands:
   users list [--type human|agent]
   users register <id> <name> [--type human|agent]
   users delete <id>
+
+  encrypt-vault               encrypt all plaintext secrets in the vault
+  key                         show master key status
+  key init                    generate master key if missing
+  key path                    show master key file path
 
   aws configure               interactive AWS setup
   aws push [key]              push secret(s) to AWS Secrets Manager
@@ -445,6 +451,58 @@ switch (command) {
     } catch (e: any) {
       console.error(`Export failed: ${e.message}`);
       process.exit(1);
+    }
+    break;
+  }
+
+  case "encrypt-vault": {
+    // Migrate all plaintext secrets to encrypted
+    const db = getDb();
+    const rows = db.prepare("SELECT key, value FROM secrets").all() as { key: string; value: string }[];
+    let migrated = 0;
+    let alreadyEncrypted = 0;
+    for (const row of rows) {
+      if (isEncrypted(row.value)) {
+        alreadyEncrypted++;
+        continue;
+      }
+      const enc = encrypt(row.value);
+      db.prepare("UPDATE secrets SET value = ?, updated_at = ? WHERE key = ?")
+        .run(enc, new Date().toISOString(), row.key);
+      migrated++;
+    }
+    console.log(`✓ Encrypted ${migrated} secret(s). ${alreadyEncrypted} already encrypted.`);
+    break;
+  }
+
+  case "key": {
+    const [sub] = positional;
+    const { join } = await import("path");
+    const { homedir } = await import("os");
+    const { existsSync } = await import("fs");
+    const keyDir = process.env.HASNA_SECRETS_KEY_DIR ?? join(homedir(), ".hasna", "secrets");
+    const keyPath = join(keyDir, "vault.key");
+    if (sub === "path") {
+      console.log(keyPath);
+    } else if (sub === "exists") {
+      console.log(existsSync(keyPath) ? "yes" : "no");
+    } else if (sub === "init") {
+      getMasterKey(); // creates if not exists
+      console.log(`✓ Master key ready at ${keyPath}`);
+    } else {
+      const exists = existsSync(keyPath);
+      console.log(`Master key: ${exists ? "✓ present" : "✗ missing"}`);
+      console.log(`Location:   ${keyPath}`);
+      if (exists) {
+        const { statSync } = await import("fs");
+        const stat = statSync(keyPath);
+        const mode = (stat.mode & 0o777).toString(8);
+        console.log(`Permissions: ${mode}${mode === "600" ? " (correct)" : " ⚠ should be 600"}`);
+      }
+      console.log(`\nCommands:`);
+      console.log(`  secrets key init     Generate key if missing`);
+      console.log(`  secrets key path     Show key file path`);
+      console.log(`  secrets key exists   Check if key exists`);
     }
     break;
   }
