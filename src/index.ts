@@ -16,7 +16,7 @@ import {
   deleteUser,
 } from "./store.js";
 import { getDb } from "./db.js";
-import { encrypt, decrypt, isEncrypted, getMasterKey } from "./crypto.js";
+import { encrypt, decrypt, isEncrypted, getMasterKey, initKms, getKeyStatus } from "./crypto.js";
 import type { SecretEntry } from "./types.js";
 
 const SECRET_TYPES: SecretEntry["type"][] = ["api_key", "password", "token", "credential", "other"];
@@ -477,32 +477,61 @@ switch (command) {
 
   case "key": {
     const [sub] = positional;
-    const { join } = await import("path");
-    const { homedir } = await import("os");
-    const { existsSync } = await import("fs");
-    const keyDir = process.env.HASNA_SECRETS_KEY_DIR ?? join(homedir(), ".hasna", "secrets");
-    const keyPath = join(keyDir, "vault.key");
-    if (sub === "path") {
-      console.log(keyPath);
+    const { statSync } = await import("fs");
+
+    if (sub === "kms") {
+      const [kmsAction] = positional.slice(1);
+      if (kmsAction === "setup") {
+        const keyId = flags["key-id"] ?? flags.key;
+        if (!keyId) { console.error("Usage: secrets key kms setup --key-id <KMS key ID or alias> [--region <region>] [--profile <profile>]"); process.exit(1); }
+        const region = flags.region ?? "us-east-1";
+        initKms(keyId, region, flags.profile);
+        console.log(`✓ KMS configured: ${keyId} (${region})`);
+        // Trigger migration if local key exists
+        getMasterKey();
+        const status = getKeyStatus();
+        if (status.mode === "kms") {
+          console.log(`✓ Data key wrapped with KMS and stored at ${status.keyPath}`);
+        }
+      } else {
+        const status = getKeyStatus();
+        if (status.mode === "kms") {
+          console.log(`Mode:       KMS (envelope encryption)`);
+          console.log(`KMS Key:    ${status.kmsKeyId}`);
+          console.log(`Data key:   ${status.keyPath} (encrypted with KMS)`);
+        } else {
+          console.log(`KMS not configured.`);
+          console.log(`\nSetup: secrets key kms setup --key-id <KMS key ID or alias> [--region us-east-1] [--profile hasna-xyz-hq]`);
+        }
+      }
+    } else if (sub === "path") {
+      const status = getKeyStatus();
+      console.log(status.keyPath);
     } else if (sub === "exists") {
-      console.log(existsSync(keyPath) ? "yes" : "no");
+      const status = getKeyStatus();
+      console.log(status.exists ? "yes" : "no");
     } else if (sub === "init") {
-      getMasterKey(); // creates if not exists
-      console.log(`✓ Master key ready at ${keyPath}`);
+      getMasterKey();
+      const status = getKeyStatus();
+      console.log(`✓ Master key ready (${status.mode} mode) at ${status.keyPath}`);
     } else {
-      const exists = existsSync(keyPath);
-      console.log(`Master key: ${exists ? "✓ present" : "✗ missing"}`);
-      console.log(`Location:   ${keyPath}`);
-      if (exists) {
-        const { statSync } = await import("fs");
-        const stat = statSync(keyPath);
-        const mode = (stat.mode & 0o777).toString(8);
-        console.log(`Permissions: ${mode}${mode === "600" ? " (correct)" : " ⚠ should be 600"}`);
+      const status = getKeyStatus();
+      console.log(`Mode:       ${status.mode}`);
+      if (status.kmsKeyId) console.log(`KMS Key:    ${status.kmsKeyId}`);
+      console.log(`Key file:   ${status.keyPath}`);
+      console.log(`Exists:     ${status.exists ? "✓ yes" : "✗ no"}`);
+      if (status.exists) {
+        try {
+          const stat = statSync(status.keyPath);
+          const mode = (stat.mode & 0o777).toString(8);
+          console.log(`Permissions: ${mode}${mode === "600" ? " (correct)" : " ⚠ should be 600"}`);
+        } catch { /* skip */ }
       }
       console.log(`\nCommands:`);
-      console.log(`  secrets key init     Generate key if missing`);
-      console.log(`  secrets key path     Show key file path`);
-      console.log(`  secrets key exists   Check if key exists`);
+      console.log(`  secrets key init                     Generate/load key`);
+      console.log(`  secrets key path                     Show key file path`);
+      console.log(`  secrets key kms setup --key-id <id>  Enable KMS envelope encryption`);
+      console.log(`  secrets key kms                      Show KMS status`);
     }
     break;
   }
